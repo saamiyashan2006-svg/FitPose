@@ -1,0 +1,76 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply font-sans text-slate-800 antialiased;
+  background: radial-gradient(120% 120% at 0% 0%, #eff9ff 0%, #f6fbff 40%, #ffffff 100%);
+}
+
+.dark body {
+  @apply text-slate-100;
+  background: radial-gradient(120% 120% at 0% 0%, #0b1f3a 0%, #0a1426 50%, #060d1c 100%);
+}
+
+@layer components {
+  .glass {
+    @apply bg-white/70 backdrop-blur-xl border border-white/60 shadow-glass;
+  }
+  .dark .glass {
+    @apply bg-slate-900/60 border-white/10;
+  }
+  .glass-card {
+    @apply glass rounded-3xl;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-brand-600 px-6 py-3 font-semibold text-white shadow-glass transition hover:bg-brand-700 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-white/60 px-5 py-2.5 font-semibold text-brand-700 border border-white/70 transition hover:bg-white active:scale-[0.98];
+  }
+  .dark .btn-ghost {
+    @apply bg-white/5 text-cyan-200 border-white/10 hover:bg-white/10;
+  }
+  .input-field {
+    @apply w-full rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-slate-800 placeholder-slate-400 outline-none transition focus:border-brand-400 focus:ring-4 focus:ring-brand-100;
+  }
+  .dark .input-field {
+    @apply border-white/10 bg-slate-800/60 text-slate-100 placeholder-slate-500 focus:border-cyan-400 focus:ring-cyan-500/20;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold;
+  }
+}
+
+@layer utilities {
+  .text-gradient {
+    @apply bg-gradient-to-r from-brand-600 via-cyan-500 to-cyan-400 bg-clip-text text-transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    @apply bg-brand-200 rounded-full;
+  }
+  .shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+  .shimmer::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.5), transparent);
+    animation: shimmer 1.6s infinite;
+  }
+}
