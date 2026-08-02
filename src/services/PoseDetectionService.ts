@@ -6,6 +6,7 @@ type BackendPoseResponse = {
   accuracy: number;
   feedback: string;
   joint_angles: Record<string, number>;
+  landmarks: DetectionResult['landmarks'];
 };
 
 const API_URL = import.meta.env.VITE_POSE_API_URL ?? 'http://localhost:5000/detect_pose';
@@ -49,7 +50,7 @@ export const PoseDetectionService = {
     }
 
     return {
-      landmarks: [],
+      landmarks: payload.landmarks,
       jointAngles: payload.joint_angles,
       postureStatus: postureStatus(payload.posture_status),
       accuracy: payload.accuracy,
@@ -60,3 +61,5 @@ export const PoseDetectionService = {
     };
   },
 };
+
+

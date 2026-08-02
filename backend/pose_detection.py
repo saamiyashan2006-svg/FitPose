@@ -89,6 +89,18 @@ class ExerciseAnalyzer:
             "right_knee": self._angle(landmarks[RIGHT_HIP], landmarks[RIGHT_KNEE], landmarks[RIGHT_ANKLE]),
         }
 
+    @staticmethod
+    def _serialize_landmarks(landmarks) -> list[dict[str, float]]:
+        return [
+            {
+                "x": round(landmark.x, 5),
+                "y": round(landmark.y, 5),
+                "z": round(landmark.z, 5),
+                "visibility": round(landmark.visibility, 5),
+            }
+            for landmark in landmarks
+        ]
+
     def analyze(self, landmarks: list | None) -> dict:
         if not landmarks:
             return {
@@ -97,6 +109,7 @@ class ExerciseAnalyzer:
                 "accuracy": 0,
                 "feedback": "Move your full body into the camera view.",
                 "joint_angles": {},
+                "landmarks": [],
             }
 
         angles = self._joint_angles(landmarks)
@@ -131,6 +144,7 @@ class ExerciseAnalyzer:
             "accuracy": accuracy,
             "feedback": " ".join(feedback) or "Good form. Keep your movement controlled.",
             "joint_angles": angles,
+            "landmarks": self._serialize_landmarks(landmarks),
         }
 
 
@@ -184,6 +198,8 @@ def detect_pose(frame):
 def close_pose_detector() -> None:
     """Release the native MediaPipe Tasks resources."""
     landmarker.close()
+
+
 
 
 

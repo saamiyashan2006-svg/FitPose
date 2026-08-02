@@ -15,6 +15,14 @@ import type { DetectionResult } from '@/types';
 
 type Phase = 'idle' | 'running' | 'paused' | 'stopped';
 
+const POSE_CONNECTIONS: [number, number][] = [
+  [0, 1], [1, 2], [2, 3], [3, 7], [0, 4], [4, 5], [5, 6], [6, 8],
+  [9, 10], [11, 12], [11, 13], [13, 15], [15, 17], [15, 19], [15, 21],
+  [17, 19], [12, 14], [14, 16], [16, 18], [16, 20], [16, 22], [18, 20],
+  [11, 23], [12, 24], [23, 24], [23, 25], [24, 26], [25, 27], [26, 28],
+  [27, 29], [28, 30], [29, 31], [30, 32], [27, 31], [28, 32],
+];
+
 const STATUS_STYLE = {
   Good: { color: 'text-emerald-500', bg: 'bg-emerald-100 dark:bg-emerald-500/20', icon: CheckCircle2, label: 'Good posture' },
   Adjusting: { color: 'text-amber-500', bg: 'bg-amber-100 dark:bg-amber-500/20', icon: AlertTriangle, label: 'Adjusting' },
@@ -45,6 +53,7 @@ export function SessionPage() {
   const [feedback, setFeedback] = useState<{ message: string; type: string }>({ message: 'Ready to begin. Press Start.', type: 'info' });
   const [feedbackLog, setFeedbackLog] = useState<{ message: string; type: string; id: number }[]>([]);
   const [cameraReady, setCameraReady] = useState(false);
+  const [landmarks, setLandmarks] = useState<DetectionResult['landmarks']>([]);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -90,6 +99,7 @@ export function SessionPage() {
     detectionInFlightRef.current = true;
     try {
       const result = await PoseDetectionService.fullDetection(videoRef.current);
+      setLandmarks(result.landmarks);
       setReps(result.repCount);
       setAccuracy(result.accuracy);
       setCalories(result.calories);
@@ -157,6 +167,7 @@ export function SessionPage() {
     setCalories(0);
     setElapsed(0);
     setStatus('Good');
+    setLandmarks([]);
     setFeedbackLog([]);
     setFeedback({ message: 'Ready to begin. Press Start.', type: 'info' });
   };
@@ -191,41 +202,21 @@ export function SessionPage() {
             {/* grid overlay */}
             <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'linear-gradient(#22d3ee55 1px, transparent 1px), linear-gradient(90deg, #22d3ee55 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
 
-            {/* skeleton overlay placeholder */}
-            <AnimatePresence>
-              {phase === 'running' || phase === 'paused' ? (
-                <motion.svg
-                  key="skeleton"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  viewBox="0 0 100 56"
-                  className="absolute inset-0 h-full w-full"
-                  preserveAspectRatio="xMidYMid meet"
-                >
-                  {/* skeleton lines */}
-                  <g stroke="#22d3ee" strokeWidth="0.5" fill="none" strokeLinecap="round">
-                    <motion.path
-                      d="M50 12 L50 30 M50 18 L38 26 M50 18 L62 26 M50 30 L40 44 M50 30 L60 44"
-                      animate={{ pathLength: [0, 1, 1, 0] }}
-                      transition={{ duration: 2, repeat: Infinity }}
-                    />
-                  </g>
-                  {/* joints */}
-                  {[[50, 12], [50, 18], [38, 26], [62, 26], [50, 30], [40, 44], [60, 44]].map(([cx, cy], i) => (
-                    <motion.circle
-                      key={i}
-                      cx={cx}
-                      cy={cy}
-                      r="1.2"
-                      fill="#5fb3ff"
-                      animate={{ scale: [1, 1.4, 1], opacity: [0.7, 1, 0.7] }}
-                      transition={{ duration: 1.5, repeat: Infinity, delay: i * 0.15 }}
-                    />
-                  ))}
-                </motion.svg>
-              ) : null}
-            </AnimatePresence>
+            {/* Live landmarks returned by the MediaPipe backend. */}
+            {landmarks.length > 0 && (phase === 'running' || phase === 'paused') && (
+              <svg viewBox="0 0 100 100" className="pointer-events-none absolute inset-0 h-full w-full" preserveAspectRatio="none">
+                <g stroke="#22d3ee" strokeWidth="0.55" fill="none" strokeLinecap="round">
+                  {POSE_CONNECTIONS.map(([start, end]) => {
+                    const from = landmarks[start];
+                    const to = landmarks[end];
+                    return from && to ? <line key={`${start}-${end}`} x1={from.x * 100} y1={from.y * 100} x2={to.x * 100} y2={to.y * 100} /> : null;
+                  })}
+                </g>
+                {landmarks.map((landmark, index) => (
+                  landmark.visibility >= 0.5 ? <circle key={index} cx={landmark.x * 100} cy={landmark.y * 100} r="0.75" fill="#ef4444" /> : null
+                ))}
+              </svg>
+            )}
 
             {/* idle overlay */}
             {phase === 'idle' && (
@@ -366,4 +357,6 @@ export function SessionPage() {
     </div>
   );
 }
+
+
 
