@@ -1,94 +1,61 @@
-import type { DetectionResult, PoseFrame, PoseLandmark } from '@/types';
+﻿import type { DetectionResult } from '@/types';
 
-const FEEDBACK_POOL = {
-  success: ['Great posture!', 'Excellent repetition.', 'Perfect form!', 'Nice and steady.'],
-  warning: ['Straighten your back.', 'Raise your arm higher.', 'Bend your knee more.', 'Slow down the movement.'],
-  error: ['Adjust your stance.', 'Knee caving inward — correct it.', 'Shoulder dropping detected.'],
+type BackendPoseResponse = {
+  rep_count: number;
+  posture_status: 'Correct posture' | 'Incorrect posture' | 'No pose detected';
+  accuracy: number;
+  feedback: string;
+  joint_angles: Record<string, number>;
 };
 
-const LANDMARK_NAMES = [
-  'nose', 'left_shoulder', 'right_shoulder', 'left_elbow', 'right_elbow',
-  'left_wrist', 'right_wrist', 'left_hip', 'right_hip', 'left_knee',
-  'right_knee', 'left_ankle', 'right_ankle',
-];
+const API_URL = import.meta.env.VITE_POSE_API_URL ?? 'http://localhost:5000/detect_pose';
 
-function rand(min: number, max: number) {
-  return min + Math.random() * (max - min);
+function postureStatus(status: BackendPoseResponse['posture_status']): DetectionResult['postureStatus'] {
+  if (status === 'Correct posture') return 'Good';
+  if (status === 'Incorrect posture') return 'Poor';
+  return 'Adjusting';
 }
 
-function pick<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
+function captureFrame(video: HTMLVideoElement): Promise<Blob> {
+  if (!video.videoWidth || !video.videoHeight) {
+    return Promise.reject(new Error('The camera stream is not ready yet.'));
+  }
 
-function generateLandmarks(): PoseLandmark[] {
-  return LANDMARK_NAMES.map(() => ({
-    x: rand(0.2, 0.8),
-    y: rand(0.1, 0.9),
-    z: rand(-0.1, 0.1),
-    visibility: rand(0.7, 1),
-  }));
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const context = canvas.getContext('2d');
+  if (!context) return Promise.reject(new Error('Unable to capture the camera frame.'));
+
+  context.drawImage(video, 0, 0, canvas.width, canvas.height);
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error('Unable to encode the camera frame.'));
+    }, 'image/jpeg', 0.85);
+  });
 }
 
 export const PoseDetectionService = {
-  async startCamera(): Promise<{ ok: true; message: string }> {
-    await new Promise((r) => setTimeout(r, 800));
-    return { ok: true, message: 'Camera initialized' };
-  },
+  async fullDetection(video: HTMLVideoElement): Promise<DetectionResult> {
+    const image = await captureFrame(video);
+    const formData = new FormData();
+    formData.append('image', image, 'camera-frame.jpg');
 
-  async detectPose(): Promise<PoseFrame> {
-    await new Promise((r) => setTimeout(r, 40));
-    const status = pick<PoseFrame['postureStatus']>(['Good', 'Good', 'Good', 'Adjusting', 'Poor']);
-    return {
-      landmarks: generateLandmarks(),
-      jointAngles: {
-        left_elbow: rand(70, 160),
-        right_elbow: rand(70, 160),
-        left_knee: rand(60, 170),
-        right_knee: rand(60, 170),
-        spine: rand(150, 180),
-        left_shoulder: rand(20, 90),
-        right_shoulder: rand(20, 90),
-      },
-      postureStatus: status,
-      timestamp: Date.now(),
-    };
-  },
-
-  calculateJointAngles(frame: PoseFrame): Record<string, number> {
-    return frame.jointAngles;
-  },
-
-  countRepetitions(prevCount: number, frame: PoseFrame): number {
-    if (frame.postureStatus === 'Good' && Math.random() < 0.18) {
-      return prevCount + 1;
+    const response = await fetch(API_URL, { method: 'POST', body: formData });
+    const payload = (await response.json()) as BackendPoseResponse | { error: string };
+    if (!response.ok || 'error' in payload) {
+      throw new Error('error' in payload ? payload.error : 'Pose detection request failed.');
     }
-    return prevCount;
-  },
 
-  calculateAccuracy(frame: PoseFrame, prev: number): number {
-    const base = frame.postureStatus === 'Good' ? 95 : frame.postureStatus === 'Adjusting' ? 82 : 68;
-    return Math.round(Math.min(100, Math.max(0, prev * 0.7 + base * 0.3)));
-  },
-
-  generateFeedback(frame: PoseFrame): { message: string; type: keyof typeof FEEDBACK_POOL } {
-    if (frame.postureStatus === 'Good') return { message: pick(FEEDBACK_POOL.success), type: 'success' };
-    if (frame.postureStatus === 'Adjusting') return { message: pick(FEEDBACK_POOL.warning), type: 'warning' };
-    return { message: pick(FEEDBACK_POOL.error), type: 'error' };
-  },
-
-  async fullDetection(prevCount: number, prevAccuracy: number): Promise<DetectionResult> {
-    const frame = await this.detectPose();
-    const repCount = this.countRepetitions(prevCount, frame);
-    const accuracy = this.calculateAccuracy(frame, prevAccuracy);
-    const fb = this.generateFeedback(frame);
     return {
-      landmarks: frame.landmarks,
-      jointAngles: frame.jointAngles,
-      postureStatus: frame.postureStatus,
-      accuracy,
-      repCount,
-      calories: Math.round(repCount * 0.25 * 10) / 10,
-      feedback: fb.message,
+      landmarks: [],
+      jointAngles: payload.joint_angles,
+      postureStatus: postureStatus(payload.posture_status),
+      accuracy: payload.accuracy,
+      repCount: payload.rep_count,
+      calories: Math.round(payload.rep_count * 0.25 * 10) / 10,
+      feedback: payload.feedback,
       timestamp: Date.now(),
     };
   },

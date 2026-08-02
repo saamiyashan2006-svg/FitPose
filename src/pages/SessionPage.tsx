@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+﻿import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -46,26 +46,64 @@ export function SessionPage() {
   const [feedbackLog, setFeedbackLog] = useState<{ message: string; type: string; id: number }[]>([]);
   const [cameraReady, setCameraReady] = useState(false);
 
+  const videoRef = useRef<HTMLVideoElement>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const detectionInFlightRef = useRef(false);
 
   useEffect(() => {
-    PoseDetectionService.startCamera().then(() => setCameraReady(true));
+    let stream: MediaStream | null = null;
+    let mounted = true;
+
+    const startCamera = async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true });
+
+        if (!mounted) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          setCameraReady(true);
+        }
+      } catch {
+        if (mounted) setCameraReady(false);
+      }
+    };
+
+    startCamera();
+
     return () => {
+      mounted = false;
+      stream?.getTracks().forEach((track) => track.stop());
+
       if (intervalRef.current) clearInterval(intervalRef.current);
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, []);
 
   const runDetection = async () => {
-    const result = await PoseDetectionService.fullDetection(reps, accuracy);
-    setReps(result.repCount);
-    setAccuracy(result.accuracy);
-    setCalories(result.calories);
-    setStatus(result.postureStatus);
-    if (result.feedback !== feedback.message) {
-      setFeedback({ message: result.feedback, type: result.postureStatus });
-      setFeedbackLog((log) => [{ message: result.feedback, type: result.postureStatus, id: result.timestamp }, ...log].slice(0, 6));
+    if (!videoRef.current || detectionInFlightRef.current) return;
+
+    detectionInFlightRef.current = true;
+    try {
+      const result = await PoseDetectionService.fullDetection(videoRef.current);
+      setReps(result.repCount);
+      setAccuracy(result.accuracy);
+      setCalories(result.calories);
+      setStatus(result.postureStatus);
+      if (result.feedback !== feedback.message) {
+        setFeedback({ message: result.feedback, type: result.postureStatus });
+        setFeedbackLog((log) => [{ message: result.feedback, type: result.postureStatus, id: result.timestamp }, ...log].slice(0, 6));
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to reach the pose detection backend.';
+      setStatus('Adjusting');
+      setFeedback({ message, type: 'info' });
+    } finally {
+      detectionInFlightRef.current = false;
     }
   };
 
@@ -131,7 +169,7 @@ export function SessionPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-display text-3xl font-bold text-slate-800 dark:text-white">AI Workout Session</h1>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{exercise.name} · {exercise.bodyPart}</p>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{exercise.name} Ã‚Â· {exercise.bodyPart}</p>
         </div>
         <button onClick={() => navigate('/app/exercises')} className="btn-ghost">
           <RotateCcw className="h-4 w-4" /> Change Exercise
@@ -142,13 +180,14 @@ export function SessionPage() {
         {/* camera preview */}
         <GlassCard className="lg:col-span-2 overflow-hidden p-0">
           <div className="relative aspect-video w-full overflow-hidden bg-slate-900">
-            {/* camera placeholder gradient */}
-            <motion.div
-              className="absolute inset-0"
-              style={{ background: 'linear-gradient(135deg, #0b1f3a, #0a1426, #060d1c)' }}
-              animate={{ opacity: phase === 'running' ? [0.85, 1, 0.85] : 1 }}
-              transition={{ duration: 2, repeat: Infinity }}
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className="absolute inset-0 w-full h-full object-cover"
             />
+
             {/* grid overlay */}
             <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'linear-gradient(#22d3ee55 1px, transparent 1px), linear-gradient(90deg, #22d3ee55 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
 
@@ -166,16 +205,22 @@ export function SessionPage() {
                 >
                   {/* skeleton lines */}
                   <g stroke="#22d3ee" strokeWidth="0.5" fill="none" strokeLinecap="round">
-                    <motion.path d="M50 12 L50 30 M50 18 L38 26 M50 18 L62 26 M50 30 L40 44 M50 30 L60 44"
+                    <motion.path
+                      d="M50 12 L50 30 M50 18 L38 26 M50 18 L62 26 M50 30 L40 44 M50 30 L60 44"
                       animate={{ pathLength: [0, 1, 1, 0] }}
                       transition={{ duration: 2, repeat: Infinity }}
                     />
                   </g>
                   {/* joints */}
-                  {[[50,12],[50,18],[38,26],[62,26],[50,30],[40,44],[60,44]].map(([cx,cy],i)=>(
-                    <motion.circle key={i} cx={cx} cy={cy} r="1.2" fill="#5fb3ff"
+                  {[[50, 12], [50, 18], [38, 26], [62, 26], [50, 30], [40, 44], [60, 44]].map(([cx, cy], i) => (
+                    <motion.circle
+                      key={i}
+                      cx={cx}
+                      cy={cy}
+                      r="1.2"
+                      fill="#5fb3ff"
                       animate={{ scale: [1, 1.4, 1], opacity: [0.7, 1, 0.7] }}
-                      transition={{ duration: 1.5, repeat: Infinity, delay: i*0.15 }}
+                      transition={{ duration: 1.5, repeat: Infinity, delay: i * 0.15 }}
                     />
                   ))}
                 </motion.svg>
@@ -187,7 +232,7 @@ export function SessionPage() {
               <div className="absolute inset-0 grid place-items-center">
                 <div className="text-center">
                   <Camera className="mx-auto h-12 w-12 text-cyan-300/70" />
-                  <p className="mt-3 text-sm text-cyan-200/80">{cameraReady ? 'Camera ready — press Start' : 'Initializing camera...'}</p>
+                  <p className="mt-3 text-sm text-cyan-200/80">{cameraReady ? 'Camera ready Ã¢â‚¬â€ press Start' : 'Initializing camera...'}</p>
                 </div>
               </div>
             )}
@@ -321,3 +366,4 @@ export function SessionPage() {
     </div>
   );
 }
+
