@@ -118,9 +118,14 @@ export function SessionPage() {
   };
 
   const handleStart = async () => {
+    if (!cameraReady || !videoRef.current?.videoWidth) {
+      toast('Camera is not ready. Allow camera access and try again.', 'error');
+      return;
+    }
     setPhase('running');
     setFeedback({ message: 'Session started. Keep moving!', type: 'Good' });
     toast('AI session started', 'success');
+    void runDetection();
     timerRef.current = setInterval(() => setElapsed((e) => e + 1), 1000);
     intervalRef.current = setInterval(runDetection, 700);
   };

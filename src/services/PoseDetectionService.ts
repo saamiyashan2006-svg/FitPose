@@ -9,7 +9,7 @@ type BackendPoseResponse = {
   landmarks: DetectionResult['landmarks'];
 };
 
-const API_URL = import.meta.env.VITE_POSE_API_URL ?? 'http://localhost:5000/detect_pose';
+const API_URL = import.meta.env.VITE_POSE_API_URL ?? '/api/detect_pose';
 
 function postureStatus(status: BackendPoseResponse['posture_status']): DetectionResult['postureStatus'] {
   if (status === 'Correct posture') return 'Good';
@@ -44,7 +44,9 @@ export const PoseDetectionService = {
     formData.append('image', image, 'camera-frame.jpg');
 
     const response = await fetch(API_URL, { method: 'POST', body: formData });
-    const payload = (await response.json()) as BackendPoseResponse | { error: string };
+    const payload = (await response.json().catch(() => ({
+      error: 'Pose AI is offline. Start it with npm run api and try again.',
+    }))) as BackendPoseResponse | { error: string };
     if (!response.ok || 'error' in payload) {
       throw new Error('error' in payload ? payload.error : 'Pose detection request failed.');
     }
