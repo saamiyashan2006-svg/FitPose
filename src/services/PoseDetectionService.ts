@@ -5,7 +5,10 @@ type BackendPoseResponse = {
   posture_status: 'Correct posture' | 'Incorrect posture' | 'No pose detected';
   accuracy: number;
   feedback: string;
+  detected_issues: string[];
   joint_angles: Record<string, number>;
+  confidence_score: number;
+  personalized_correction: string;
   landmarks: DetectionResult['landmarks'];
 };
 
@@ -38,10 +41,11 @@ function captureFrame(video: HTMLVideoElement): Promise<Blob> {
 }
 
 export const PoseDetectionService = {
-  async fullDetection(video: HTMLVideoElement): Promise<DetectionResult> {
+  async fullDetection(video: HTMLVideoElement, exercise = 'squats'): Promise<DetectionResult> {
     const image = await captureFrame(video);
     const formData = new FormData();
     formData.append('image', image, 'camera-frame.jpg');
+    formData.append('exercise', exercise);
 
     const response = await fetch(API_URL, { method: 'POST', body: formData });
     const payload = (await response.json().catch(() => ({
@@ -59,6 +63,9 @@ export const PoseDetectionService = {
       repCount: payload.rep_count,
       calories: Math.round(payload.rep_count * 0.25 * 10) / 10,
       feedback: payload.feedback,
+      detectedIssues: payload.detected_issues ?? [],
+      confidenceScore: payload.confidence_score ?? 0,
+      personalizedCorrection: payload.personalized_correction ?? payload.feedback,
       timestamp: Date.now(),
     };
   },

@@ -54,6 +54,10 @@ export function SessionPage() {
   const [feedbackLog, setFeedbackLog] = useState<{ message: string; type: string; id: number }[]>([]);
   const [cameraReady, setCameraReady] = useState(false);
   const [landmarks, setLandmarks] = useState<DetectionResult['landmarks']>([]);
+  const [detectedIssues, setDetectedIssues] = useState<string[]>([]);
+  const [confidenceScore, setConfidenceScore] = useState(0);
+  const [personalizedCorrection, setPersonalizedCorrection] = useState('');
+  const [jointAngles, setJointAngles] = useState<Record<string, number>>({});
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -98,12 +102,16 @@ export function SessionPage() {
 
     detectionInFlightRef.current = true;
     try {
-      const result = await PoseDetectionService.fullDetection(videoRef.current);
+      const result = await PoseDetectionService.fullDetection(videoRef.current, exercise.id);
       setLandmarks(result.landmarks);
       setReps(result.repCount);
       setAccuracy(result.accuracy);
       setCalories(result.calories);
       setStatus(result.postureStatus);
+      setDetectedIssues(result.detectedIssues);
+      setConfidenceScore(result.confidenceScore);
+      setPersonalizedCorrection(result.personalizedCorrection);
+      setJointAngles(result.jointAngles);
       if (result.feedback !== feedback.message) {
         setFeedback({ message: result.feedback, type: result.postureStatus });
         setFeedbackLog((log) => [{ message: result.feedback, type: result.postureStatus, id: result.timestamp }, ...log].slice(0, 6));
@@ -174,6 +182,10 @@ export function SessionPage() {
     setStatus('Good');
     setLandmarks([]);
     setFeedbackLog([]);
+    setDetectedIssues([]);
+    setConfidenceScore(0);
+    setPersonalizedCorrection('');
+    setJointAngles({});
     setFeedback({ message: 'Ready to begin. Press Start.', type: 'info' });
   };
 
@@ -348,13 +360,44 @@ export function SessionPage() {
                 "{feedback.message}"
               </motion.div>
             </AnimatePresence>
-            <div className="mt-4 space-y-1.5">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Recent</p>
-              {feedbackLog.map((f) => (
-                <div key={f.id} className="flex items-center gap-2 text-xs text-slate-500">
-                  <Activity className="h-3 w-3 text-brand-400" /> {f.message}
+            <div className="mt-4 space-y-3">
+              <div className="rounded-2xl border border-slate-200/70 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-900/60">
+                <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-slate-400">
+                  <span>Confidence</span>
+                  <span className="text-slate-700 dark:text-slate-200">{Math.round(confidenceScore * 100)}%</span>
                 </div>
-              ))}
+                <div className="mt-2 h-2 rounded-full bg-slate-200 dark:bg-slate-700">
+                  <div className="h-2 rounded-full bg-cyan-500" style={{ width: `${Math.max(8, confidenceScore * 100)}%` }} />
+                </div>
+              </div>
+              <div className="rounded-2xl border border-slate-200/70 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-900/60">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Detected issues</p>
+                <ul className="mt-2 space-y-1 text-sm text-slate-600 dark:text-slate-300">
+                  {detectedIssues.length > 0 ? detectedIssues.map((issue) => <li key={issue} className="flex gap-2"><span className="mt-1 h-2 w-2 rounded-full bg-amber-400" />{issue}</li>) : <li className="text-emerald-600">No issues detected for the current pose.</li>}
+                </ul>
+              </div>
+              <div className="rounded-2xl border border-slate-200/70 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-900/60">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Personalized correction</p>
+                <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{personalizedCorrection || 'Maintain your current alignment and keep the movement controlled.'}</p>
+              </div>
+              <div className="rounded-2xl border border-slate-200/70 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-900/60">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Joint angles</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {Object.entries(jointAngles).map(([name, angle]) => (
+                    <span key={name} className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-600 shadow-sm dark:bg-slate-800 dark:text-slate-300">
+                      {name.replace(/_/g, ' ')}: {angle.toFixed(1)}°
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Recent</p>
+                {feedbackLog.map((f) => (
+                  <div key={f.id} className="flex items-center gap-2 text-xs text-slate-500">
+                    <Activity className="h-3 w-3 text-brand-400" /> {f.message}
+                  </div>
+                ))}
+              </div>
             </div>
           </GlassCard>
         </div>

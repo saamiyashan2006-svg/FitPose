@@ -28,10 +28,12 @@ def detect_pose_endpoint():
         return ("", 204)
 
     image_file = request.files.get("image") or request.files.get("frame")
+    exercise = request.form.get("exercise") or request.args.get("exercise")
     if image_file:
         image_bytes = image_file.read()
     else:
         payload = request.get_json(silent=True) or {}
+        exercise = exercise or payload.get("exercise")
         encoded_image = payload.get("image") or payload.get("frame")
         if not encoded_image:
             return jsonify({"error": "Send an image file as 'image' or a base64 image in JSON."}), 400
@@ -46,7 +48,7 @@ def detect_pose_endpoint():
     if frame is None:
         return jsonify({"error": "The supplied file is not a valid image."}), 400
 
-    _, _, analysis = detect_and_analyze(frame)
+    _, _, analysis = detect_and_analyze(frame, exercise=exercise)
     return jsonify(analysis)
 
 

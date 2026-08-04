@@ -68,5 +68,8 @@ export interface DetectionResult {
   repCount: number;
   calories: number;
   feedback: string;
+  detectedIssues: string[];
+  confidenceScore: number;
+  personalizedCorrection: string;
   timestamp: number;
 }
