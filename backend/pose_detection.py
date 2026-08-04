@@ -35,6 +35,7 @@ LEFT_WRIST, RIGHT_WRIST = 15, 16
 LEFT_HIP, RIGHT_HIP = 23, 24
 LEFT_KNEE, RIGHT_KNEE = 25, 26
 LEFT_ANKLE, RIGHT_ANKLE = 27, 28
+NOSE = 0
 
 
 def _create_landmarker() -> mp.tasks.vision.PoseLandmarker:
@@ -57,11 +58,14 @@ def _create_landmarker() -> mp.tasks.vision.PoseLandmarker:
 
 
 class ExerciseAnalyzer:
-    """Tracks squat repetitions and gives simple form feedback across frames."""
+    """Analyzes pose landmarks and produces exercise-specific feedback from joint angles."""
 
     def __init__(self) -> None:
         self.rep_count = 0
         self.phase = "up"
+        self._exercise_confidence = 0
+        self._active_exercise: str | None = None
+        self._session_state = "idle"
 
     @staticmethod
     def _angle(first, vertex, third) -> float:
@@ -77,7 +81,14 @@ class ExerciseAnalyzer:
         ) / (first_length * third_length)
         return round(math.degrees(math.acos(max(-1.0, min(1.0, cosine)))), 1)
 
+    @staticmethod
+    def _midpoint(first, second):
+        return type("Midpoint", (), {"x": (first.x + second.x) / 2, "y": (first.y + second.y) / 2, "z": (first.z + second.z) / 2, "visibility": (first.visibility + second.visibility) / 2})()
+
     def _joint_angles(self, landmarks) -> dict[str, float]:
+        shoulder_mid = self._midpoint(landmarks[LEFT_SHOULDER], landmarks[RIGHT_SHOULDER])
+        hip_mid = self._midpoint(landmarks[LEFT_HIP], landmarks[RIGHT_HIP])
+        knee_mid = self._midpoint(landmarks[LEFT_KNEE], landmarks[RIGHT_KNEE])
         return {
             "left_elbow": self._angle(landmarks[LEFT_SHOULDER], landmarks[LEFT_ELBOW], landmarks[LEFT_WRIST]),
             "right_elbow": self._angle(landmarks[RIGHT_SHOULDER], landmarks[RIGHT_ELBOW], landmarks[RIGHT_WRIST]),
@@ -87,6 +98,8 @@ class ExerciseAnalyzer:
             "right_hip": self._angle(landmarks[RIGHT_SHOULDER], landmarks[RIGHT_HIP], landmarks[RIGHT_KNEE]),
             "left_knee": self._angle(landmarks[LEFT_HIP], landmarks[LEFT_KNEE], landmarks[LEFT_ANKLE]),
             "right_knee": self._angle(landmarks[RIGHT_HIP], landmarks[RIGHT_KNEE], landmarks[RIGHT_ANKLE]),
+            "back": self._angle(shoulder_mid, hip_mid, knee_mid),
+            "neck": self._angle(shoulder_mid, landmarks[NOSE], hip_mid),
         }
 
     @staticmethod
@@ -101,57 +114,198 @@ class ExerciseAnalyzer:
             for landmark in landmarks
         ]
 
-    def analyze(self, landmarks: list | None) -> dict:
+    @staticmethod
+    def _normalize_exercise(exercise: str | None) -> str:
+        if not exercise:
+            return "squats"
+        normalized = str(exercise).strip().lower().replace(" ", "-")
+        mapping = {
+            "squat": "squats",
+            "squats": "squats",
+            "push-up": "push-up",
+            "pushup": "push-up",
+            "plank": "plank",
+            "shoulder-raise": "shoulder-raise",
+            "shoulder-raises": "shoulder-raise",
+            "knee-bend": "knee-bend",
+            "neck-stretch": "neck-stretch",
+            "hip-rotation": "hip-rotation",
+        }
+        return mapping.get(normalized, "squats")
+
+    def _confidence_score(self, landmarks, angles: dict[str, float]) -> float:
+        relevant_visibility = [
+            landmark.visibility
+            for landmark in landmarks
+            if getattr(landmark, "visibility", 0.0) is not None
+        ]
+        visibility_score = sum(relevant_visibility) / len(relevant_visibility) if relevant_visibility else 0.0
+        asymmetry_penalty = (
+            abs(angles["left_knee"] - angles["right_knee"]) / 90
+            + abs(angles["left_elbow"] - angles["right_elbow"]) / 90
+            + abs(angles["left_shoulder"] - angles["right_shoulder"]) / 90
+        ) / 3
+        return round(max(0.0, min(1.0, 0.6 * visibility_score + 0.4 * (1 - min(1.0, asymmetry_penalty)))), 2)
+
+    def _detect_exercise(self, angles: dict[str, float], exercise: str | None = None) -> str | None:
+        exercise_key = self._normalize_exercise(exercise)
+        average_knee_angle = (angles["left_knee"] + angles["right_knee"]) / 2
+        average_elbow_angle = (angles["left_elbow"] + angles["right_elbow"]) / 2
+        average_shoulder_angle = (angles["left_shoulder"] + angles["right_shoulder"]) / 2
+
+        if exercise_key == "squats":
+            if average_knee_angle <= 130 and average_knee_angle >= 70:
+                return "squats"
+            return None
+
+        if exercise_key == "push-up":
+            if average_elbow_angle <= 130 and average_elbow_angle >= 70:
+                return "push-up"
+            return None
+
+        if exercise_key == "plank":
+            if angles["back"] <= 180 and angles["back"] >= 140 and average_shoulder_angle <= 180 and average_shoulder_angle >= 120:
+                return "plank"
+            return None
+
+        if exercise_key == "shoulder-raise":
+            if average_elbow_angle >= 120:
+                return "shoulder-raise"
+            return None
+
+        return None
+
+    def _update_active_exercise(self, detected_exercise: str | None) -> str | None:
+        if detected_exercise is None:
+            self._exercise_confidence = 0
+            self._active_exercise = None
+            self._session_state = "idle"
+            return None
+
+        if self._active_exercise == detected_exercise:
+            self._exercise_confidence = min(3, self._exercise_confidence + 1)
+        else:
+            self._active_exercise = detected_exercise
+            self._exercise_confidence = 1
+
+        if self._exercise_confidence == 1:
+            self._session_state = "starting"
+        elif self._exercise_confidence == 2:
+            self._session_state = "active"
+        else:
+            self._session_state = "active"
+
+        return detected_exercise if self._exercise_confidence >= 3 else None
+
+    def analyze(self, landmarks: list | None, exercise: str | None = None) -> dict:
         if not landmarks:
             return {
                 "rep_count": self.rep_count,
-                "posture_status": "No pose detected",
+                "posture_status": "No exercise detected",
                 "accuracy": 0,
-                "feedback": "Move your full body into the camera view.",
+                "feedback": "No exercise detected.",
+                "detected_issues": ["No exercise detected"],
                 "joint_angles": {},
+                "confidence_score": 0.0,
+                "personalized_correction": "Stand still and begin the movement so exercise detection can start.",
+                "session_state": "idle",
                 "landmarks": [],
             }
 
         angles = self._joint_angles(landmarks)
         average_knee_angle = (angles["left_knee"] + angles["right_knee"]) / 2
-        if average_knee_angle <= 110:
-            self.phase = "down"
-        elif self.phase == "down" and average_knee_angle >= 160:
-            self.rep_count += 1
-            self.phase = "up"
-
-        shoulder_difference = abs(angles["left_shoulder"] - angles["right_shoulder"])
-        hip_difference = abs(angles["left_hip"] - angles["right_hip"])
+        average_elbow_angle = (angles["left_elbow"] + angles["right_elbow"]) / 2
         knee_difference = abs(angles["left_knee"] - angles["right_knee"])
-        penalties = []
-        feedback = []
+        shoulder_difference = abs(angles["left_shoulder"] - angles["right_shoulder"])
+        detected_exercise = self._update_active_exercise(self._detect_exercise(angles, exercise=exercise))
 
-        if shoulder_difference > 15 or hip_difference > 18:
-            penalties.append(max(shoulder_difference, hip_difference))
-            feedback.append("Keep your shoulders and hips level.")
-        if knee_difference > 15:
-            penalties.append(knee_difference)
-            feedback.append("Keep both knees moving evenly.")
-        if average_knee_angle < 65:
-            penalties.append(20)
-            feedback.append("Do not force an excessively deep knee bend.")
+        if detected_exercise == "squats":
+            if average_knee_angle <= 110:
+                self.phase = "down"
+            elif self.phase == "down" and average_knee_angle >= 160:
+                self.rep_count += 1
+                self.phase = "up"
 
-        accuracy = max(0, round(100 - sum(penalties)))
-        posture_status = "Correct posture" if not feedback else "Incorrect posture"
+        issues: list[str] = []
+        corrections: list[str] = []
+
+        if detected_exercise == "squats":
+            if average_knee_angle > 120:
+                issues.append(f"Knee depth is too shallow ({average_knee_angle:.1f}°).")
+                corrections.append(f"Lower until your knees bend to about 90°; your current knee angle is {average_knee_angle:.1f}°.")
+            elif average_knee_angle < 70:
+                issues.append(f"Knee depth is excessive ({average_knee_angle:.1f}°).")
+                corrections.append(f"Reduce the depth slightly and keep your weight in your heels; your knee angle is {average_knee_angle:.1f}°.")
+            if knee_difference > 10:
+                issues.append("The knees are not tracking evenly.")
+                corrections.append("Keep both knees moving in the same line over your feet.")
+            if angles["back"] < 145:
+                issues.append(f"The torso is leaning forward ({angles['back']:.1f}°).")
+                corrections.append(f"Brace your core and keep your torso more upright; trunk angle is {angles['back']:.1f}°.")
+        elif detected_exercise == "push-up":
+            if average_elbow_angle > 125:
+                issues.append(f"The elbows are not bending enough ({average_elbow_angle:.1f}°).")
+                corrections.append(f"Lower until your elbows bend close to 90°; your current elbow angle is {average_elbow_angle:.1f}°.")
+            elif average_elbow_angle < 70:
+                issues.append(f"The elbows are bending too sharply ({average_elbow_angle:.1f}°).")
+                corrections.append(f"Stop the descent sooner and keep the shoulders stacked over the wrists; current elbow angle is {average_elbow_angle:.1f}°.")
+            if shoulder_difference > 10:
+                issues.append("The shoulders are not level.")
+                corrections.append("Keep your shoulders level and your hips square to the floor.")
+        elif detected_exercise == "plank":
+            if angles["back"] < 145:
+                issues.append(f"The hips are sagging ({angles['back']:.1f}°).")
+                corrections.append(f"Brace your core and raise your hips until your body forms a straight line; trunk angle is {angles['back']:.1f}°.")
+            if angles["neck"] < 140:
+                issues.append(f"The head is dropping forward ({angles['neck']:.1f}°).")
+                corrections.append(f"Keep your neck neutral and look slightly forward; neck angle is {angles['neck']:.1f}°.")
+        elif detected_exercise == "shoulder-raise":
+            if average_elbow_angle > 145:
+                issues.append(f"The elbows are too bent ({average_elbow_angle:.1f}°).")
+                corrections.append(f"Keep a softer elbow bend and raise the arms with the shoulders; current elbow angle is {average_elbow_angle:.1f}°.")
+            if shoulder_difference > 10:
+                issues.append("The shoulders are hiking unevenly.")
+                corrections.append("Keep the shoulders relaxed and avoid lifting them toward the ears.")
+
+        if not detected_exercise:
+            issues = []
+            corrections = []
+            accuracy = 0
+            posture_status = "No exercise detected"
+            feedback = "No exercise detected."
+            personalized_correction = "Stand still and begin the movement so exercise detection can start."
+        else:
+            confidence_score = self._confidence_score(landmarks, angles)
+            accuracy = round(max(0, min(100, 100 - len(issues) * 12 - (1 - confidence_score) * 20)))
+            posture_status = "Correct posture" if not issues else "Incorrect posture"
+            feedback = " ".join(issues) or "Good form. Keep your movement smooth and controlled."
+            personalized_correction = corrections[0] if corrections else "Maintain your current alignment and keep the movement controlled."
+
         return {
             "rep_count": self.rep_count,
             "posture_status": posture_status,
             "accuracy": accuracy,
-            "feedback": " ".join(feedback) or "Good form. Keep your movement controlled.",
+            "feedback": feedback,
+            "detected_issues": issues if detected_exercise else ["No exercise detected"],
             "joint_angles": angles,
+            "confidence_score": confidence_score if detected_exercise else 0.0,
+            "personalized_correction": personalized_correction,
+            "session_state": self._session_state,
             "landmarks": self._serialize_landmarks(landmarks),
         }
 
 
-landmarker = _create_landmarker()
+landmarker = None
 analyzer = ExerciseAnalyzer()
 _last_timestamp_ms = 0
 _detection_lock = threading.Lock()
+
+
+def _get_landmarker():
+    global landmarker
+    if landmarker is None:
+        landmarker = _create_landmarker()
+    return landmarker
 
 
 def _draw_pose(frame, pose_landmarks) -> None:
@@ -174,30 +328,32 @@ def _run_detection(frame):
     image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
     timestamp_ms = max(int(time.monotonic() * 1000), _last_timestamp_ms + 1)
     _last_timestamp_ms = timestamp_ms
-    return landmarker.detect_for_video(image, timestamp_ms)
+    return _get_landmarker().detect_for_video(image, timestamp_ms)
 
 
-def detect_and_analyze(frame):
+def detect_and_analyze(frame, exercise: str | None = None):
     """Detect a pose, draw it on ``frame``, and return the analysis JSON data."""
     with _detection_lock:
         results = _run_detection(frame)
         landmarks = results.pose_landmarks[0] if results.pose_landmarks else None
-        analysis = analyzer.analyze(landmarks)
+        analysis = analyzer.analyze(landmarks, exercise=exercise)
 
     if landmarks:
         _draw_pose(frame, landmarks)
     return frame, results, analysis
 
 
-def detect_pose(frame):
+def detect_pose(frame, exercise: str | None = None):
     """Backward-compatible landmark detection used by the webcam view."""
-    frame, results, _ = detect_and_analyze(frame)
+    frame, results, _ = detect_and_analyze(frame, exercise=exercise)
     return frame, results
 
 
 def close_pose_detector() -> None:
     """Release the native MediaPipe Tasks resources."""
-    landmarker.close()
+    if landmarker is not None:
+        landmarker.close()
+        landmarker = None
 
 
 
