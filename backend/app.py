@@ -13,13 +13,18 @@ app = Flask(__name__)
 def add_cors_headers(response):
     response.headers["Access-Control-Allow-Origin"] = "*"
     response.headers["Access-Control-Allow-Headers"] = "Content-Type"
-    response.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     return response
 
 
 @app.route("/")
 def home():
     return "FitPose Backend is Running"
+
+
+@app.route("/health", methods=["GET"])
+def health_check():
+    return jsonify({"status": "ok", "service": "FitPose Backend"})
 
 
 @app.route("/detect_pose", methods=["POST", "OPTIONS"])

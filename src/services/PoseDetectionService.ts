@@ -12,7 +12,15 @@ type BackendPoseResponse = {
   landmarks: DetectionResult['landmarks'];
 };
 
+type BackendHealthResponse = {
+  status: 'ok' | 'error';
+  service?: string;
+};
+
 const API_URL = import.meta.env.VITE_POSE_API_URL ?? '/api/detect_pose';
+const HEALTH_URL = import.meta.env.VITE_POSE_API_URL ? `${import.meta.env.VITE_POSE_API_URL.replace(/\/detect_pose$/, '')}/health` : '/api/health';
+const LOCAL_API_URL = 'http://127.0.0.1:5000/detect_pose';
+const LOCAL_HEALTH_URL = 'http://127.0.0.1:5000/health';
 
 function postureStatus(status: BackendPoseResponse['posture_status']): DetectionResult['postureStatus'] {
   if (status === 'Correct posture') return 'Good';
@@ -41,17 +49,40 @@ function captureFrame(video: HTMLVideoElement): Promise<Blob> {
 }
 
 export const PoseDetectionService = {
+  async healthCheck(): Promise<boolean> {
+    for (const url of [HEALTH_URL, LOCAL_HEALTH_URL]) {
+      try {
+        const response = await fetch(url, { method: 'GET' });
+        const payload = (await response.json().catch(() => ({}))) as BackendHealthResponse | Record<string, unknown>;
+        if (response.ok && payload.status === 'ok') return true;
+      } catch {
+        // try next endpoint
+      }
+    }
+    return false;
+  },
+
   async fullDetection(video: HTMLVideoElement, exercise = 'squats'): Promise<DetectionResult> {
     const image = await captureFrame(video);
     const formData = new FormData();
     formData.append('image', image, 'camera-frame.jpg');
     formData.append('exercise', exercise);
 
-    const response = await fetch(API_URL, { method: 'POST', body: formData });
-    const payload = (await response.json().catch(() => ({
-      error: 'Pose AI is offline. Start it with npm run api and try again.',
-    }))) as BackendPoseResponse | { error: string };
-    if (!response.ok || 'error' in payload) {
+    let response: Response | null = null;
+    let payload: BackendPoseResponse | { error: string } = { error: 'Pose AI is offline. Start it with npm run api and try again.' };
+    const endpoints = [API_URL, LOCAL_API_URL];
+    for (const endpoint of endpoints) {
+      try {
+        response = await fetch(endpoint, { method: 'POST', body: formData });
+        payload = (await response.json().catch(() => ({
+          error: 'Pose AI is offline. Start it with npm run api and try again.',
+        }))) as BackendPoseResponse | { error: string };
+        if (response.ok && !('error' in payload)) break;
+      } catch {
+        response = null;
+      }
+    }
+    if (!response || !response.ok || 'error' in payload) {
       throw new Error('error' in payload ? payload.error : 'Pose detection request failed.');
     }
 

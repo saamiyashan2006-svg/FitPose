@@ -53,6 +53,7 @@ export function SessionPage() {
   const [feedback, setFeedback] = useState<{ message: string; type: string }>({ message: 'Ready to begin. Press Start.', type: 'info' });
   const [feedbackLog, setFeedbackLog] = useState<{ message: string; type: string; id: number }[]>([]);
   const [cameraReady, setCameraReady] = useState(false);
+  const [aiReady, setAiReady] = useState(false);
   const [landmarks, setLandmarks] = useState<DetectionResult['landmarks']>([]);
   const [detectedIssues, setDetectedIssues] = useState<string[]>([]);
   const [confidenceScore, setConfidenceScore] = useState(0);
@@ -82,11 +83,30 @@ export function SessionPage() {
           setCameraReady(true);
         }
       } catch {
-        if (mounted) setCameraReady(false);
+        if (mounted) {
+          setCameraReady(false);
+          setAiReady(false);
+          setFeedback({ message: 'Camera initialization failed. Allow access and reload.', type: 'error' });
+        }
       }
     };
 
     startCamera();
+
+    const checkAiReady = async () => {
+      const backendReady = await PoseDetectionService.healthCheck();
+      if (mounted) {
+        setAiReady(backendReady);
+        if (!backendReady) {
+          setFeedback({
+            message: 'AI backend is unavailable. Start it with npm run api and try again.',
+            type: 'warning',
+          });
+        }
+      }
+    };
+
+    void checkAiReady();
 
     return () => {
       mounted = false;
@@ -128,6 +148,11 @@ export function SessionPage() {
   const handleStart = async () => {
     if (!cameraReady || !videoRef.current?.videoWidth) {
       toast('Camera is not ready. Allow camera access and try again.', 'error');
+      return;
+    }
+    if (!aiReady) {
+      toast('AI backend is not available. Start it with npm run api first.', 'error');
+      setFeedback({ message: 'AI backend unavailable. Start it with npm run api.', type: 'warning' });
       return;
     }
     setPhase('running');
@@ -240,7 +265,9 @@ export function SessionPage() {
               <div className="absolute inset-0 grid place-items-center">
                 <div className="text-center">
                   <Camera className="mx-auto h-12 w-12 text-cyan-300/70" />
-                  <p className="mt-3 text-sm text-cyan-200/80">{cameraReady ? 'Camera ready Ã¢â‚¬â€ press Start' : 'Initializing camera...'}</p>
+                  <p className="mt-3 text-sm text-cyan-200/80">
+                    {cameraReady ? (aiReady ? 'Camera + AI ready — press Start' : 'Camera ready, waiting for AI backend...') : 'Initializing camera...'}
+                  </p>
                 </div>
               </div>
             )}
