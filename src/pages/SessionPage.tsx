@@ -54,6 +54,8 @@ export function SessionPage() {
   const [feedbackLog, setFeedbackLog] = useState<{ message: string; type: string; id: number }[]>([]);
   const [cameraReady, setCameraReady] = useState(false);
   const [aiReady, setAiReady] = useState(false);
+  const [voiceEnabled, setVoiceEnabled] = useState(true);
+  const [voiceSupported, setVoiceSupported] = useState(false);
   const [landmarks, setLandmarks] = useState<DetectionResult['landmarks']>([]);
   const [detectedIssues, setDetectedIssues] = useState<string[]>([]);
   const [confidenceScore, setConfidenceScore] = useState(0);
@@ -61,6 +63,8 @@ export function SessionPage() {
   const [jointAngles, setJointAngles] = useState<Record<string, number>>({});
 
   const videoRef = useRef<HTMLVideoElement>(null);
+  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const lastVoiceMessageRef = useRef('');
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const detectionInFlightRef = useRef(false);
@@ -116,6 +120,31 @@ export function SessionPage() {
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    setVoiceSupported(typeof window !== 'undefined' && 'speechSynthesis' in window);
+  }, []);
+
+  const speakVoiceMessage = (message: string) => {
+    if (!voiceSupported || !voiceEnabled || !message) return;
+    const synth = window.speechSynthesis;
+    synth.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(message);
+    utterance.lang = 'en-US';
+    utterance.rate = 1;
+    utterance.pitch = 1;
+    utterance.volume = 1;
+    utteranceRef.current = utterance;
+    lastVoiceMessageRef.current = message;
+    synth.speak(utterance);
+  };
+
+  useEffect(() => {
+    if (!voiceSupported || !voiceEnabled || phase === 'idle') return;
+    if (!feedback.message) return;
+    speakVoiceMessage(feedback.message);
+  }, [feedback.message, voiceEnabled, voiceSupported, phase]);
 
   const runDetection = async () => {
     if (!videoRef.current || detectionInFlightRef.current) return;
@@ -418,7 +447,27 @@ export function SessionPage() {
                 </div>
               </div>
               <div className="space-y-1.5">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Recent</p>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Recent</p>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={!voiceSupported}
+                      onClick={() => setVoiceEnabled((enabled) => !enabled)}
+                      className={`rounded-full px-3 py-1 text-xs font-semibold transition ${voiceSupported ? 'bg-cyan-500 text-white hover:bg-cyan-600' : 'bg-slate-200 text-slate-500 cursor-not-allowed'}`}
+                    >
+                      {voiceEnabled ? 'Mute Voice' : 'Enable Voice'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!voiceSupported || !lastVoiceMessageRef.current}
+                      onClick={() => speakVoiceMessage(lastVoiceMessageRef.current)}
+                      className={`rounded-full px-3 py-1 text-xs font-semibold transition ${voiceSupported ? 'bg-slate-800 text-white hover:bg-slate-900' : 'bg-slate-200 text-slate-500 cursor-not-allowed'}`}
+                    >
+                      Repeat
+                    </button>
+                  </div>
+                </div>
                 {feedbackLog.map((f) => (
                   <div key={f.id} className="flex items-center gap-2 text-xs text-slate-500">
                     <Activity className="h-3 w-3 text-brand-400" /> {f.message}
