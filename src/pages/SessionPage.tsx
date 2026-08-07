@@ -103,7 +103,7 @@ export function SessionPage() {
         setAiReady(backendReady);
         if (!backendReady) {
           setFeedback({
-            message: 'AI backend is unavailable. Start it with npm run api and try again.',
+            message: 'AI backend is unavailable. Please try again later.',
             type: 'warning',
           });
         }
@@ -180,8 +180,8 @@ export function SessionPage() {
       return;
     }
     if (!aiReady) {
-      toast('AI backend is not available. Start it with npm run api first.', 'error');
-      setFeedback({ message: 'AI backend unavailable. Start it with npm run api.', type: 'warning' });
+      toast('AI backend is not available. Please try again later.', 'error');
+      setFeedback({ message: 'AI backend unavailable. Please try again later.', type: 'warning' });
       return;
     }
     setPhase('running');

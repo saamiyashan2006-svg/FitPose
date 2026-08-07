@@ -17,10 +17,22 @@ type BackendHealthResponse = {
   service?: string;
 };
 
-const API_URL = import.meta.env.VITE_POSE_API_URL ?? '/api/detect_pose';
-const HEALTH_URL = import.meta.env.VITE_POSE_API_URL ? `${import.meta.env.VITE_POSE_API_URL.replace(/\/detect_pose$/, '')}/health` : '/api/health';
-const LOCAL_API_URL = 'http://127.0.0.1:5000/detect_pose';
-const LOCAL_HEALTH_URL = 'http://127.0.0.1:5000/health';
+const DEFAULT_PRODUCTION_API_BASE_URL = 'https://fitpose-1.onrender.com';
+const DEFAULT_LOCAL_API_BASE_URL = 'http://127.0.0.1:5000';
+
+function buildApiUrl(baseUrl: string, endpoint: 'detect_pose' | 'health') {
+  const trimmedBaseUrl = baseUrl.trim().replace(/\/+$/, '');
+  return `${trimmedBaseUrl}/${endpoint}`;
+}
+
+const configuredApiUrl = import.meta.env.VITE_POSE_API_URL?.trim();
+const isProduction = import.meta.env.PROD;
+const apiBaseUrl = configuredApiUrl
+  ? (configuredApiUrl.endsWith('/detect_pose') ? configuredApiUrl.replace(/\/detect_pose$/, '') : configuredApiUrl)
+  : (isProduction ? DEFAULT_PRODUCTION_API_BASE_URL : DEFAULT_LOCAL_API_BASE_URL);
+
+const API_URL = buildApiUrl(apiBaseUrl, 'detect_pose');
+const HEALTH_URL = buildApiUrl(apiBaseUrl, 'health');
 
 function postureStatus(status: BackendPoseResponse['posture_status']): DetectionResult['postureStatus'] {
   if (status === 'Correct posture') return 'Good';
@@ -50,7 +62,8 @@ function captureFrame(video: HTMLVideoElement): Promise<Blob> {
 
 export const PoseDetectionService = {
   async healthCheck(): Promise<boolean> {
-    for (const url of [HEALTH_URL, LOCAL_HEALTH_URL]) {
+    const urls = isProduction ? [HEALTH_URL] : [HEALTH_URL, buildApiUrl(DEFAULT_PRODUCTION_API_BASE_URL, 'health')];
+    for (const url of urls) {
       try {
         const response = await fetch(url, { method: 'GET' });
         const payload = (await response.json().catch(() => ({}))) as BackendHealthResponse | Record<string, unknown>;
@@ -69,13 +82,13 @@ export const PoseDetectionService = {
     formData.append('exercise', exercise);
 
     let response: Response | null = null;
-    let payload: BackendPoseResponse | { error: string } = { error: 'Pose AI is offline. Start it with npm run api and try again.' };
-    const endpoints = [API_URL, LOCAL_API_URL];
+    let payload: BackendPoseResponse | { error: string } = { error: 'Pose AI is offline. Please try again later.' };
+    const endpoints = isProduction ? [API_URL] : [API_URL, buildApiUrl(DEFAULT_PRODUCTION_API_BASE_URL, 'detect_pose')];
     for (const endpoint of endpoints) {
       try {
         response = await fetch(endpoint, { method: 'POST', body: formData });
         payload = (await response.json().catch(() => ({
-          error: 'Pose AI is offline. Start it with npm run api and try again.',
+          error: 'Pose AI is offline. Please try again later.',
         }))) as BackendPoseResponse | { error: string };
         if (response.ok && !('error' in payload)) break;
       } catch {
