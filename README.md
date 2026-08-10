@@ -6,8 +6,8 @@
 - Saamiya
 - Saurabh
 - Nandini
-- Adeeba
-- Gunja
+- Shreya
+- Devesh
 
 ## Features
 - AI Pose Detection
