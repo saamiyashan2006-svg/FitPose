@@ -7,8 +7,6 @@
 - Saurabh
 - Nandini
 - Shreya
-- Devesh
-- Namra
 
 ## Features
 - AI Pose Detection
