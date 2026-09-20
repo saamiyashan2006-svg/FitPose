@@ -5,9 +5,6 @@
 ### Team Members
 - Saamiya
 - Saurabh
-- Nandini
-- Shreya
-
 ## Features
 - AI Pose Detection
 - Exercise Guidance
